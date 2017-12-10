@@ -1,0 +1,96 @@
+---
+title: "Possitional accuracy - RMSE Computation"
+output: word_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(rgdal)
+library(rgeos)
+library(spdep)
+library(sp)
+library(plotKML)
+library(plyr)
+```
+#Introduction
+
+This is an algorithm that automatises the computation of RMSE between OSM road intersections and equivalent intersections digitised using Google Earth imagery.
+
+**The inputs for this algorithm are:**
+
+1. The admin units selected for the sampling process   
+2. The road OSM intersections selected for the sampling process
+3. Equivalent intersections digitized in Google Earth   
+
+**The outputs of the algorithm are:**
+ 
+1. RMSE at country level
+2. RMSE for urban regions  
+3. RMSE for rural regions  
+
+```{r}
+country_data_input <- "..."
+```
+
+Read and project input data
+
+```{r}
+setwd(country_data_input)
+admin_units <- readOGR(country_data_input,'admin_units_tagged',verbose=FALSE)
+admin_units_proj <- spTransform(admin_units, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data <- readOGR(country_data_input,'intersections_select',verbose=FALSE)
+osm_data_proj <- spTransform(osm_data, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+ogrListLayers(dsn="sampled_intersections.kml") 
+sampled_data <-readOGR(dsn="sampled_intersections.kml",layer="Temporary Places")
+sampled_data_proj<- spTransform(sampled_data, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+sampled_data_proj <- intersect(sampled_data_proj, admin_units_proj)
+sampled_data_proj <- sampled_data_proj[, c(1, 3,58)]
+```
+
+Match 
+
+```{r}
+sampled_data_proj@data$owncoordsX <- sampled_data_proj@coords[,1]
+sampled_data_proj@data$owncoordsY <- sampled_data_proj@coords[,2]
+osm_data_proj@data$matchcoordsX <- osm_data_proj@coords[,1]
+osm_data_proj@data$matchcoordsY <- osm_data_proj@coords[,2]
+sampled_data_analysis <- merge(sampled_data_proj,osm_data_proj,by="Name")
+sampled_data_analysis@data$matchdist <- spDists(cbind(sampled_data_analysis@data$owncoordsX,sampled_data_analysis@data$owncoordsY),cbind(sampled_data_analysis@data$matchcoordsX,sampled_data_analysis@data$matchcoordsY),diagonal = TRUE)
+sampled_data_analysis1 <- sampled_data_analysis[sampled_data_analysis@data$matchdist<300, ]
+only_data<-sampled_data_analysis1@data
+```
+
+Compute RMSE statistics at country level
+
+```{r}
+freq=length(only_data$Name)
+x_rmse <-sqrt( mean( (only_data$owncoordsX-only_data$matchcoordsX)^2, na.rm = TRUE) )
+y_rmse <-sqrt( mean( (only_data$owncoordsY-only_data$matchcoordsY)^2, na.rm = TRUE) )
+tot_rmse<-sqrt( mean( (only_data$owncoordsX-only_data$matchcoordsX)^2+(only_data$owncoordsY-only_data$matchcoordsY)^2 , na.rm = TRUE ))
+rmse<-data.frame(Nr_Points=freq,X_Rmse=x_rmse,Y_Rmse=y_rmse,RMSE=tot_rmse)
+rmse
+```
+
+Compute urban and rural RMSE statistics
+
+```{r}
+urban_rural<-ddply(only_data,"type",function(x){
+freq=length(x$type)
+x_rmse <-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2, na.rm = TRUE) )
+y_rmse <-sqrt( mean( (x$owncoordsY-x$matchcoordsY)^2, na.rm = TRUE) )
+tot_rmse<-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2+(x$owncoordsY-x$matchcoordsY)^2 , na.rm = TRUE ) )
+data.frame(Nr_Points=freq,X_Rmse=x_rmse,Y_Rmse=y_rmse,RMSE=tot_rmse)})
+urban_rural
+```
+
+Compute urban and rural RMSE statistics
+
+```{r}
+regional<-ddply(only_data,"UBID",function(x){
+freq=length(x$UBID)
+x_rmse <-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2, na.rm = TRUE) )
+y_rmse <-sqrt( mean( (x$owncoordsY-x$matchcoordsY)^2, na.rm = TRUE) )
+tot_rmse<-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2+(x$owncoordsY-x$matchcoordsY)^2 , na.rm = TRUE ) )
+data.frame(Nr_Points=freq,X_Rmse=x_rmse,Y_Rmse=y_rmse,RMSE=tot_rmse)})
+regional
+sd(regional$RMSE)
+```

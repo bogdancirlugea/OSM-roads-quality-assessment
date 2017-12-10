@@ -1,0 +1,127 @@
+---
+title: "Possitional accuracy - Random selection"
+output: word_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(rgeos)
+library(rgdal)
+library(maptools)
+library(classInt)
+library(spdep)
+library(rmarkdown)
+library(Rlab)
+library(sp)
+library(plotKML)
+library(splancs)
+library(raster)
+```
+
+#Introduction
+
+This is an algorithm automatising the process of sampling road intersection for possitional assesment.
+
+**The inputs for this algorithm are:**
+
+1. GPW admin units for the country to be studied    
+2. Road intersections precomputed in ArcGIS with the intersect/dissolve method  
+3. The country road network to help the digitization process  
+
+The algorithm selects 10 regions, based on the fraction of urban & rural regions defined by the users. Urban regions are randomly selected from the upper 10% of population density while rural regions are sected from the rest of the admin regions.    
+
+**The outputs of the algorithm are:**
+
+1. 10 admin units selected for the sampling process (KML format)  
+2. All intersections in the selected regions in (KML format)  
+3. All road segments in the selected regions in KML format  
+
+These layers are ready to be imported in Google Earth to guide the digitization process.
+
+Define data location and the number of rural and urban regions to be randomly selected for the analysed country.
+
+```{r}
+country_data_input <- "..."
+country_data_output <- "..."
+nr_urban_regions <-5
+nr_rural_regions <-5
+```
+
+Read input data.
+
+```{r}
+admin_units <- readOGR(country_data_input,'gha_adm2_2010',verbose=FALSE)
+admin_units_proj <- spTransform(admin_units, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+roads <- readOGR(country_data_input,'ghana_highways',verbose=FALSE)
+roads_proj <- spTransform(roads, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+road_intersections <- readOGR(country_data_input,'ghana_intersections',verbose=FALSE)
+road_intersections_proj <- spTransform(road_intersections, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+```
+
+Eliminate admin units having under 25 road intersections.
+
+```{r}
+count <- as.data.frame(table(over(road_intersections_proj, admin_units_proj[,"UBID"])))
+colnames(count) <-c("UBID","count")
+admin_units_count <- merge(admin_units_proj,count, by= "UBID")
+admin_units_filtered <- admin_units_count[admin_units_count@data$count>=25,]
+```
+
+Define urban and rural admin regions.
+
+```{r}
+admin_units_filtered@data$type<-ifelse(quantile(admin_units_filtered@data$E_ATOTP_16,.90) <= admin_units_filtered@data$E_ATOTP_16, "urban", "rural")
+setwd(country_data_input)
+writeOGR(admin_units_filtered,"." , "admin_units_tagged", driver="ESRI Shapefile",verbose=FALSE)
+```
+
+Randomly select the defined number of urban and rural regions.
+
+```{r}
+admin_units_urban <- admin_units_filtered@data[admin_units_filtered@data$type=="urban",]
+admin_units_rural <- admin_units_filtered@data[admin_units_filtered@data$type=="rural",]
+admin_units_urban_select <- admin_units_urban[sample(nrow(admin_units_urban),nr_urban_regions),]
+admin_units_rural_select <- admin_units_rural[sample(nrow(admin_units_rural),nr_rural_regions),]
+admin_data_select<-rbind(admin_units_urban_select,admin_units_rural_select)
+admin_select<-admin_units_filtered[admin_units_filtered@data$UBID %in% admin_data_select$UBID,]
+```
+
+Export the admin units in a KML file and verify that they corespond to visible imagery in Google Earth.
+If it is not the case repeat the above step and generate new regions.
+
+```{r}
+setwd(country_data_output)
+kml(admin_select, file = "admin_units.kml",colour = "yellow", alpha=0.30)
+```
+
+Generate random points to help sampling. Admin units are multi-polygon features. In most cases admin units are composed by one polygon but in case of costal regions many small additional polygons may exist (islands). The algorithm generates points only the main region (one having the biggest area for the admin unit).  
+
+```{r}
+random_points <- list()
+for (i in 1:length(admin_select)) {
+    max = 0
+    for (j in 1:length(admin_select@polygons[[i]]@Polygons)){
+    if(max<admin_select@polygons[[i]]@Polygons[[j]]@area){
+    max<-admin_select@polygons[[i]]@Polygons[[j]]@area
+    admin<-admin_select@polygons[[i]]@Polygons[[j]]@coords
+    }
+    }
+  random_points <- rbind(random_points,csr(admin,10))}
+  coords <- matrix(as.numeric(unlist(random_points)),nrow=nrow(random_points))
+  random_points_spatial<-SpatialPoints(coords, proj4string=CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+```
+
+Export the selected roads and selected road intersections in the 10 selected admin units as well as the randomly generated points in KML format.
+Export the selected road intersections in Shape format to be reused for the RMSE computation process. 
+
+```{r}
+setwd(country_data_output)
+intersections_select<-road_intersections_proj[!is.na(over(road_intersections_proj, geometry(admin_select))),]
+intersections_select@data$Name <- seq_len(nrow(intersections_select))
+kml(intersections_select, file = "intersections_select.kml",colour = "yellow", points_names = intersections_select@data$Name,size = 1.2)
+roads_select<-roads_proj[!is.na(over(roads_proj, geometry(admin_select))),]
+kml(roads_select, file = "roads_select.kml",colour = "blue",size = 1.2)
+kml(random_points_spatial, file = "random_points.kml",colour = "red",size = 1.2)
+setwd(country_data_input)
+writeOGR(intersections_select, "." , "intersections_select", driver="ESRI Shapefile",verbose=FALSE)
+```
