@@ -1,0 +1,17 @@
+sensitivity_analysis_correction<-function(x,y,z){
+drops <- c("Type")
+new_x <- x[,!(names(x) %in% drops)]
+new_y <- y[,!(names(y) %in% drops)]
+new_z <- z[,!(names(z) %in% drops)]
+analysis_data <- rbind(new_x,new_y,new_z)
+analysis_data1 <- analysis_data[(quantile(analysis_data@data$pointRMSE,.10) <= analysis_data@data$pointRMSE & analysis_data@data$pointRMSE <= quantile(analysis_data@data$pointRMSE,.90)),] 
+analysis_data2 <- analysis_data1[sample(nrow(analysis_data1)),]
+points <- data.frame(pts= numeric(length(analysis_data2@data$owncoordsX)), rmse= integer(length(analysis_data2@data$owncoordsX)))
+for (i in 1:length(analysis_data2@data$owncoordsX)){
+only_data<-analysis_data2@data[1:i,]
+ge_tot_rmse<-sqrt( mean( (only_data$owncoordsX-only_data$matchcoordsX)^2+(only_data$owncoordsY-only_data$matchcoordsY)^2 , na.rm = TRUE ) )
+points$pts[i]<-i
+points$rmse[i]<-ge_tot_rmse
+}
+return(points)
+}

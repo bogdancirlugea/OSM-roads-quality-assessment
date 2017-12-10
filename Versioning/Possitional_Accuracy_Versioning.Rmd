@@ -1,0 +1,188 @@
+---
+title: "Positional accuracy - Analysis of sampling methods"
+output: html_document
+---
+
+#Introduction
+
+This is a script that verifies the correlation between the number of versions of OSM road network features and positional accuracy. 
+Road intersections were tagged with the average number of versions of 'parent' road segments. 
+Also they were tagged with thier RMSE respective to coresponding intersection sampled on imagery.
+
+**Inputs
+1. The road OSM intersections selected for the sampling process tagged with the average number of version of parent roads
+2. Equivalent intersections digitized in Google Earth 
+
+**Outputs
+1. Correlation statistics between average version numbers and RMSE 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+setwd("...")
+source("basic_analysis.txt")
+source("regional_analysis.txt")
+source("urban_rural_analysis.txt")
+source("match_data.txt")
+source("sensitivity_analysis.txt")
+source("sensitivity_analysis_correction.txt")
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+liberia_urban_rural_data_location <-'...'
+
+guinea_urban_rural_data_location <- '...'
+
+ghana_data_location <- '...'
+
+senegal_data_location <- '...'
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(rgdal)
+library(maptools)
+library(raster)
+library(rgeos)
+library(classInt)
+library(RColorBrewer)
+library(RANN)
+library(Matrix)
+library(spdep)
+library(plyr)
+library(ggplot2)
+library(gridExtra)
+library(rmarkdown)
+library(xtable)
+library(Rlab)
+```
+
+## Versioning analysis
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+##Read/Prepare Liberia##
+keeps <- c("Name","MEAN_osmve","pointRMSE","Type")
+ge_data_urban_rural <- readOGR(liberia_urban_rural_data_location,'ge_data',verbose=FALSE)
+osm_data_urban_rural <- readOGR(liberia_urban_rural_data_location,'osm_data',verbose=FALSE)
+a<-match_data(ge_data_urban_rural,osm_data_urban_rural)
+new_a <- a[,(names(a) %in% keeps)]
+
+
+##Read/Prepare Guinea##
+
+ge_data_urban_rural <- readOGR(guinea_urban_rural_data_location,'ge_data',verbose=FALSE)
+osm_data_urban_rural <- readOGR(guinea_urban_rural_data_location,'osm_data',verbose=FALSE)
+b<-match_data(ge_data_urban_rural,osm_data_urban_rural)
+new_b <- b[,(names(b) %in% keeps)]
+
+##Read/Prepare Ghana##
+setwd(ghana_data_location)
+admin_units <- readOGR(ghana_data_location,'admin_units_tagged',verbose=FALSE)
+admin_units_proj <- spTransform(admin_units, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data_urban_rural <- readOGR(ghana_data_location,'intersections_select',verbose=FALSE)
+ge_data_urban_rural <-readOGR(dsn="sampled_intersections.kml",layer="Temporary Places")
+ge_data_urban_rural<-spTransform(ge_data_urban_rural, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data_urban_rural <- intersect(osm_data_urban_rural, admin_units_proj)
+colnames(osm_data_urban_rural@data)[60] <- "Type"
+c<-match_data(ge_data_urban_rural,osm_data_urban_rural)
+new_c <- c[,(names(c) %in% keeps)]
+
+##Read/Prepare Senegal##
+
+setwd(senegal_data_location)
+admin_units <- readOGR(senegal_data_location,'admin_units_tagged',verbose=FALSE)
+admin_units_proj <- spTransform(admin_units, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data_urban_rural <- readOGR(senegal_data_location,'intersections_select',verbose=FALSE)
+ge_data_urban_rural <-readOGR(dsn="sampled_intersections.kml",layer="Temporary Places")
+ge_data_urban_rural<-spTransform(ge_data_urban_rural, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data_urban_rural <- intersect(osm_data_urban_rural, admin_units_proj)
+colnames(osm_data_urban_rural@data)[60] <- "Type"
+d<-match_data(ge_data_urban_rural,osm_data_urban_rural)
+new_d <- d[,(names(d) %in% keeps)]
+```
+
+```{r, include=FALSE}
+countries = c("Liberia", "Guinea", "Ghana", "Senegal","Global-U","Global-R","Global-U-R") 
+coeff_all_values = c(0, 0, 0, 0, 0, 0, 0)
+all_count = c(0, 0, 0, 0, 0, 0, 0)
+coeff_subset = c(0, 0, 0, 0, 0, 0, 0) 
+subset_count = c(0, 0, 0, 0, 0, 0, 0)
+correlation = data.frame(countries, coeff_all_values, all_count, coeff_subset, subset_count)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Liberia
+
+analysis_data <- new_a
+correlation$coeff_all_values[1] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[1] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[1] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[1]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Guinea
+
+analysis_data <- new_b
+correlation$coeff_all_values[2] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[2] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[2] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[2]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Ghana
+
+analysis_data <- new_c
+correlation$coeff_all_values[3] <-cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[3] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[3] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[3]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Senegal
+
+analysis_data <- new_d
+correlation$coeff_all_values[4] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[4] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[4] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[4]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Global - Urban Data Only
+
+analysis_data <- rbind(new_a,new_b,new_c,new_d)
+analysis_data <- analysis_data[analysis_data@data$Type=="urban",]
+correlation$coeff_all_values[5] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[5] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[5] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[5]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Global - Rural Data Only
+
+analysis_data <- rbind(new_a,new_b,new_c,new_d)
+analysis_data <- analysis_data[analysis_data@data$Type=="rural",]
+correlation$coeff_all_values[6] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[6] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[6] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[6]<- length(analysis_data_filtered@data$MEAN_osmve)
+
+#Global - Urban - Rurla Data
+
+analysis_data <- rbind(new_a,new_b,new_c,new_d)
+correlation$coeff_all_values[7] <- cor(analysis_data@data$MEAN_osmve, analysis_data@data$pointRMSE)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve>=3,]
+correlation$coeff_subset[7] <- cor(analysis_data_filtered@data$MEAN_osmve, analysis_data_filtered@data$pointRMSE)
+correlation$all_count[7] <- length(analysis_data@data$MEAN_osmve)
+correlation$subset_count[7]<- length(analysis_data_filtered@data$MEAN_osmve)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+setwd("...")
+write.table(correlation, file = "foo.csv", sep = ",")
+analysis_data <- rbind(new_a,new_b,new_c,new_d)
+analysis_data_filtered <- analysis_data[analysis_data@data$MEAN_osmve<=10,]
+png('versioning_correlation.png',width = 10, height= 7, units = 'in' , res = 300)
+ggplot(analysis_data_filtered@data,aes(MEAN_osmve,pointRMSE))+geom_point(color="blue")+xlab("Number of versions (-)") + ylab("RMSE (m)")+xlim(0, 10)+geom_smooth(data=analysis_data@data,aes(MEAN_osmve,pointRMSE),method=lm,se=FALSE)
+dev.off()
+```

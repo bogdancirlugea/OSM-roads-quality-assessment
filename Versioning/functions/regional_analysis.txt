@@ -1,0 +1,19 @@
+regional_analysis<-function(x,y){
+sampled_data_proj<- spTransform(x, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+osm_data_proj <- spTransform(y, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))
+sampled_data_proj@data$owncoordsX <- sampled_data_proj@coords[,1]
+sampled_data_proj@data$owncoordsY <- sampled_data_proj@coords[,2]
+osm_data_proj@data$matchcoordsX <- osm_data_proj@coords[,1]
+osm_data_proj@data$matchcoordsY <- osm_data_proj@coords[,2]
+sampled_data_analysis <- merge(sampled_data_proj,osm_data_proj,by="Name")
+sampled_data_analysis@data$matchdist <- spDists(cbind(sampled_data_analysis@data$owncoordsX,sampled_data_analysis@data$owncoordsY),cbind(sampled_data_analysis@data$matchcoordsX,sampled_data_analysis@data$matchcoordsY),diagonal = TRUE)
+sampled_data_analysis1 <- sampled_data_analysis[sampled_data_analysis@data$matchdist<300, ]
+only_data<-sampled_data_analysis1@data
+regional<-ddply(only_data,"USCID",function(x){
+freq=length(x$USCID)
+x_rmse <-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2, na.rm = TRUE) )
+y_rmse <-sqrt( mean( (x$owncoordsY-x$matchcoordsY)^2, na.rm = TRUE) )
+tot_rmse<-sqrt( mean( (x$owncoordsX-x$matchcoordsX)^2+(x$owncoordsY-x$matchcoordsY)^2 , na.rm = TRUE ) )
+data.frame(Nr_Points=freq,X_Rmse=x_rmse,Y_Rmse=y_rmse,RMSE=tot_rmse)})
+return(regional)
+}
